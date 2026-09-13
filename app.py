@@ -1046,6 +1046,119 @@ basket sizes is fragile — the app flags large imbalances.
     )
 
 
+PLAIN_METRIC = {
+    "Total Return": "how much money you'd have made or lost by holding the stock over this period",
+    "Annualized Volatility": "how much the stock's price jumps around day to day — a rougher ride, "
+                             "whether it's making or losing money",
+    "Sharpe (Return/Risk)": "how much reward the stock gave you for each unit of bumpiness it put "
+                            "you through — a way to ask \"was the ride worth it\"",
+    "vs 200-day MA": "whether the stock is trading above or below its own typical price over "
+                     "roughly the last year",
+    "Max Drawdown": "the worst drop the stock took from a peak to its lowest point — \"at its "
+                    "worst, how much would you have been down\"",
+}
+
+
+def _plain_chance(p: float) -> str:
+    """Turn a p-value into a '~X times out of 100' phrase a non-statistician can picture."""
+    if not np.isfinite(p):
+        return "couldn't be worked out from this data"
+    pct = p * 100
+    if pct < 1:
+        return "less than 1 time out of 100"
+    return f"about {pct:.0f} times out of 100"
+
+
+def _tab_plain(res: dict):
+    unit = res["unit"]
+    name_a, name_b = res["name_a"], res["name_b"]
+    metric = res["metric"]
+    sig = res["significant"]
+    delta = res["delta"]
+    higher = name_a if delta > 0 else name_b
+    lower = name_b if delta > 0 else name_a
+    verb = "more" if delta > 0 else "less"
+    plain_desc = PLAIN_METRIC.get(metric, metric.lower())
+    chance_phrase = _plain_chance(res["primary_p"])
+    cles_pct = res["cles"] * 100
+
+    st.markdown(
+        "A/B testing just means: split things into two groups, measure something about each "
+        "group, then ask *\"is the difference we see real, or could it just be luck?\"* Here, "
+        "the two groups are baskets of stocks instead of, say, two versions of a website button."
+    )
+
+    cls = "sig" if sig else "null"
+    if abs(delta) < 1e-9:
+        headline = f"{name_a} and {name_b} came out basically tied"
+        sub = f"On average the two groups scored almost the same on {metric.lower()}."
+    elif sig:
+        headline = f"Yes — {higher} really does look different here"
+        sub = (f"On average, {name_a} scored {fmt_signed(delta, unit)} {verb} than {name_b} on "
+               f"{metric.lower()}. That gap is big enough that it probably isn't just luck.")
+    else:
+        headline = "We can't be confident there's a real difference"
+        sub = (f"On average, {name_a} scored {fmt_signed(delta, unit)} {verb} than {name_b} on "
+               f"{metric.lower()} — but a gap that size could easily happen just by chance.")
+    st.markdown(f'<div class="verdict {cls}"><h3>{headline}</h3><div class="sub">{sub}</div></div>',
+                unsafe_allow_html=True)
+
+    st.markdown(f"""
+**What did we actually compare?**
+
+{metric} measures {plain_desc}. We scored every stock in **{name_a}** ({res['na']} stocks) and
+every stock in **{name_b}** ({res['nb']} stocks) on that, then compared the two groups.
+
+**Could this just be luck?**
+
+Imagine flipping two coins a bunch of times and comparing how often each lands heads. Even if the
+coins are identical, you'd still see small differences between them now and then, purely by chance.
+A statistical test asks: *if there were really no difference between the groups, how often would a
+gap this big turn up anyway, just from randomness?*
+
+Here, the answer is **{chance_phrase}**. {"That's rare enough that we call it a real, meaningful difference — not a fluke." if sig else "That's common enough that we can't rule out plain chance, so we call this result *not statistically significant*."}
+
+**How often would one side actually come out ahead?**
+
+If you picked one random stock from {name_a} and one random stock from {name_b}, {name_a} would
+come out ahead on {metric.lower()} about **{cles_pct:.0f}% of the time** (a tie counts as a coin flip).
+""")
+
+    if res["better"] == "low":
+        st.info(f"For {metric}, a *lower* number is usually seen as better (less risk of loss), "
+                "so keep that in mind when reading \"ahead\" above.")
+
+    if min(res["na"], res["nb"]) < 5:
+        st.warning("Heads up: this test only had a handful of stocks per side. With so few "
+                   "examples, the result is fragile — swapping in one or two different stocks "
+                   "could change the picture a lot. Treat this as a first impression, not a "
+                   "final verdict.")
+
+    with st.expander("A few honest caveats"):
+        st.markdown("""
+- **Past performance isn't a promise.** Everything here is based on history. It doesn't tell you
+  what either group of stocks will do next.
+- **"Significant" doesn't mean "big."** With enough data, even a tiny, real difference can be
+  statistically significant. Always look at the actual size of the gap (shown above), not just
+  whether the test called it significant.
+- **This isn't investment advice.** It's a way to compare how groups of stocks have behaved —
+  not a recommendation to buy, sell, or hold anything.
+""")
+
+    with st.expander("What do the technical words in the other tabs mean?"):
+        st.markdown("""
+- **p-value** — the chance of seeing a gap this big purely by luck, if there were really no
+  difference. Smaller means more surprising, which means more likely to be a real difference.
+- **Statistically significant** — the gap was surprising enough (below the threshold you set)
+  that it's probably not just luck.
+- **Confidence interval** — a range that most likely contains the *true* difference, rather than
+  just the one number we happened to measure from this sample of stocks.
+- **Effect size (Hedges' g, Cliff's delta)** — how *big* the difference is, on a scale that
+  doesn't depend on how many stocks were tested.
+- **Volatility / standard deviation** — how spread out or jumpy the numbers are.
+""")
+
+
 def render_results(res: dict):
     if not res["ok"]:
         st.error("Each basket needs at least 2 tickers with usable price history. "
@@ -1082,7 +1195,7 @@ def render_results(res: dict):
         st.info(f"Unbalanced baskets ({res['na']} vs {res['nb']}). You're comparing averages "
                 "over different-sized groups — read them with care.")
 
-    tabs = st.tabs(["Statistics", "Charts", "Per-ticker data", "Method"])
+    tabs = st.tabs(["Statistics", "Charts", "Per-ticker data", "Method", "Plain English"])
     with tabs[0]:
         _tab_statistics(res)
     with tabs[1]:
@@ -1091,6 +1204,8 @@ def render_results(res: dict):
         _tab_data(res)
     with tabs[3]:
         _tab_method(res)
+    with tabs[4]:
+        _tab_plain(res)
 
 
 # --------------------------------------------------------------------------- #
