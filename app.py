@@ -1278,7 +1278,7 @@ def main():
         metric = st.selectbox("Metric", list(METRICS), index=0,
                               help="What each stock is scored on.")
         st.caption(METRICS[metric]["help"])
-        window = st.select_slider("Window", options=list(TRADING_DAYS), value="6mo",
+        window = st.select_slider("Window", options=list(TRADING_DAYS), value="1y",
                                   disabled=not METRICS[metric]["uses_window"])
         if not METRICS[metric]["uses_window"]:
             st.caption("This metric uses full history, so the window is ignored.")
